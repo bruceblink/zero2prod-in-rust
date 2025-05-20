@@ -6,8 +6,15 @@ async fn health_check() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
+// 定义表单数据结构体
+#[derive(serde::Deserialize)]
+struct FormData {
+    email: String,
+    name: String,
+}
+
 // 总是返回200
-async fn subscribe() -> HttpResponse {
+async fn subscribe(_form: web::Form<FormData>) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
