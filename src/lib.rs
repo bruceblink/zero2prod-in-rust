@@ -1,3 +1,7 @@
+pub mod configuration;
+pub mod routes;
+pub mod startup;
+
 use std::net::TcpListener;
 use actix_web::{App, HttpResponse, HttpServer, web};
 use actix_web::dev::Server;
