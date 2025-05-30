@@ -27,7 +27,7 @@ tracing-actix-web = "0.7"
 secrecy = { version = "0.8", features = ["serde"] }
 
 [dependencies.sqlx]
-version = "0.8.6"
+version = "0.6"
 default-features = false
 features = [
     "runtime-tokio-rustls",
@@ -35,7 +35,8 @@ features = [
     "postgres",
     "uuid",
     "chrono",
-    "migrate"
+    "migrate",
+    "offline"
 ]
 
 [dev-dependencies]
