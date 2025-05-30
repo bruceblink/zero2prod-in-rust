@@ -35,6 +35,8 @@ pub fn get_configuration() -> Result<Setting, config::ConfigError> {
     let settings = config::Config::builder()
         .add_source(config::File::from(configuration_directory.join("base.yaml")))
         .add_source(config::File::from(configuration_directory.join(&environment_filename)))
+        // 从环境变量中添加设置,例如，通过 APP_APPLICATION__PORT可以设置为 Settings.application.port
+        .add_source(config::Environment::with_prefix("APP").prefix_separator("_").separator("__"))
         .build()?;
     settings.try_deserialize::<Setting>()
 }
