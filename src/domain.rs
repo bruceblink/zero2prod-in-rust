@@ -8,7 +8,7 @@ pub struct NewSubscriber {
 }
 
 impl SubscriberName {
-    pub fn parse(s: String) -> SubscriberName {
+    pub fn parse(s: String) -> Result<SubscriberName, String> {
         // 判断字符串是否为空的
         let is_empty_or_whitespace = s.trim().is_empty();
         // 判断字符串是否长度
@@ -20,7 +20,7 @@ impl SubscriberName {
         if is_empty_or_whitespace || is_too_long || contains_forbidden_characters {
             panic!("{} is not a valid subscriber name.", s)
         }else {
-            Self(s)
+            Ok(Self(s))
         }
     }
 }
