@@ -89,7 +89,7 @@ jobs:
 
       # 8. 上传打包产物
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: newsletter-binary
           path: newsletter.tar.gz
