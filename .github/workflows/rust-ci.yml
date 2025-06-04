@@ -1,0 +1,78 @@
+# .github/workflows/rust-ci.yml
+name: Rust CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # 声明一个 PostgreSQL 服务
+    services:
+      postgres:
+        image: postgres:latest
+        # 下面 ENV 变量会在容器内部生效，用来初始化数据库
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: newsletter
+        # 把容器的 5432 暴露给宿主机
+        ports:
+          - 5432:5432
+        # 加个 Health check，等数据库 ready 了再往下跑
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # 把 DATABASE_URL 设成刚才那份服务的地址
+    env:
+      # 这里 host 可以写 localhost 或者 127.0.0.1，
+      # 因为 services 里 mapping 了 5432:5432
+      DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install sqlx-cli (可选，用来跑迁移)
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      - name: Wait for Postgres to be ready
+        # 因为刚启动的 postgres 服务还需要几秒钟才能完全可用
+        run: |
+          for i in {1..10}; do
+            if pg_isready -h localhost -U postgres; then
+              echo "Postgres is ready!"
+              break
+            else
+              echo "Waiting for Postgres..."
+              sleep 2
+            fi
+          done
+
+      - name: Create test database & run migrations
+        # 如果数据库还没创建表，需要先跑迁移
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+        run: |
+          # （1）建库（如果 migrations 里已经包含 CREATE DATABASE，这步可省略）
+          # 注意：如果你在测试里自己对 database_name 做了随机更改，这里只需要跑迁移即可
+          sqlx database create
+          sqlx migrate run
+
+      - name: Run tests
+        env:
+          # 确保测试时也能拿到同一个 DATABASE_URL
+          DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+        run: cargo test --verbose
