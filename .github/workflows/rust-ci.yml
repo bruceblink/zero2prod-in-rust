@@ -79,13 +79,13 @@ jobs:
       - name: Package binary
         run: |
           mkdir -p package
-          # 假设可执行文件名为 newsletter，位于 target/release/
-          cp target/release/newsletter package/
-          tar -czf newsletter.tar.gz -C package newsletter
+          # 假设可执行文件名为 zero2prod，位于 target/release/
+          cp target/release/zero2prod package/
+          tar -czf zero2prod.tar.gz -C package zero2prod
 
       # 7. 上传打包产物
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: newsletter-binary
-          path: newsletter.tar.gz
+          path: zero2prod.tar.gz
