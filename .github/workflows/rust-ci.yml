@@ -1,66 +1,69 @@
 name: Rust CI & Release
 
+# 触发条件：当推送到 main 分支或创建以 v 开头的 tag 时触发
 on:
   push:
-    # 常规情况：push 到 main 分支时触发
     branches:
-      - main
-    # 推送 tag（例如 v1.2.3）时也触发
+      - main        # 推送到 main 分支时运行 CI（执行测试与构建）
     tags:
-      - 'v*'
+      - 'v*'         # 推送以 v 开头的 tag（如 v1.2.3）时运行 CI，也会触发发布
 
+# 在所有步骤中启用彩色输出
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Linux 构建和测试 + 发布
+  # ───────────────────────────────
+  # Linux 平台：构建、测试、打包、发布
+  # ───────────────────────────────
   linux:
     runs-on: ubuntu-latest
 
-    # 如果需要运行集成测试，请保留以下 Postgres 服务
+    # 如果需要在集成测试里连接数据库，则在 Linux Runner 上启动一个 Postgres 服务容器
     services:
       postgres:
         image: postgres:latest
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: newsletter
+          POSTGRES_USER: postgres          # 容器内 Postgres 用户名
+          POSTGRES_PASSWORD: password      # 容器内 Postgres 密码
+          POSTGRES_DB: newsletter           # 容器内默认数据库名
         ports:
-          - 5432:5432
+          - 5432:5432                       # 将容器的 5432 端口映射到宿主机 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+                                           # 健康检查：确认 Postgres 准备就绪
+          --health-interval 10s             # 每 10 秒检查一次
+          --health-timeout 5s               # 超时时间 5 秒
+          --health-retries 5                # 重试 5 次直到成功
 
     env:
-      # 测试和迁移时会用到
       DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
-      # 用于执行发布、上传资产
+      # 测试、迁移阶段连接数据库所用的环境变量
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 用于发布 Release 的 GitHub Token，自动注入，无需手动配置
 
     steps:
-      # ────────────────────────────────────────────────────────────────────────
+      # ────────────────────────────────────────────────────
       # 1. 检出仓库代码
-      # ────────────────────────────────────────────────────────────────────────
+      # ────────────────────────────────────────────────────
       - name: Checkout repository
-      - uses: actions/checkout@v3
+        uses: actions/checkout@v3
+        # 将当前仓库代码拉取到 Runner 上
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 2. 设置 Rust 工具链
-      # ────────────────────────────────────────────────────────────────────────
-      # ────────────────────────────────────────────────────────────────────────
-      # 3. 安装 sqlx-cli（仅在需要跑迁移时使用）
-      # ────────────────────────────────────────────────────────────────────────
+      # ────────────────────────────────────────────────────
+      # 2. 安装 SQLx CLI（可选，仅用于数据库迁移）
+      # ────────────────────────────────────────────────────
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
+        # 安装 sqlx-cli，以便执行 `sqlx database create` 和 `sqlx migrate run`
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
-      # ────────────────────────────────────────────────────────────────────────
+      # ────────────────────────────────────────────────────
+      # 3. 等待 Postgres 服务就绪（仅在集成测试场景）
+      # ────────────────────────────────────────────────────
       - name: Wait for Postgres to be ready
         run: |
           for i in {1..10}; do
+            # 每次循环用 pg_isready 检查 Postgres 是否准备好
             if pg_isready -h localhost -U postgres; then
               echo "Postgres is ready!"
               break
@@ -70,82 +73,127 @@ jobs:
             fi
           done
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 5. 创建数据库并运行迁移（仅在集成测试场景）
-      # ────────────────────────────────────────────────────────────────────────
+      # ────────────────────────────────────────────────────
+      # 4. 创建数据库并运行迁移（仅在集成测试场景）
+      # ────────────────────────────────────────────────────
       - name: Create database & run migrations
         run: |
+          # 尝试创建数据库，若已存在则忽略错误
           sqlx database create || echo "database already exists"
+          # 对新创建的库运行 migrations/ 目录下所有迁移脚本
           sqlx migrate run
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 6. 运行测试（包括单元和集成测试）
-      # ────────────────────────────────────────────────────────────────────────
+      # ────────────────────────────────────────────────────
+      # 5. 运行测试（包括单元测试与集成测试）
+      # ────────────────────────────────────────────────────
       - name: Run tests
         run: cargo test --verbose
+        # 执行所有测试用例，若有失败则 CI 报错
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 7. 构建 Release 可执行文件
-      # ────────────────────────────────────────────────────────────────────────
+      # ────────────────────────────────────────────────────
+      # 6. 构建 Release 可执行文件
+      # ────────────────────────────────────────────────────
       - name: Build (release)
         run: cargo build --release
-      # ────────────────────────────────────────────────────────────────────────
-      # 8.（仅在 tag 推送时）打包可执行文件
-      # ────────────────────────────────────────────────────────────────────────
+        # 生成优化后的可执行文件，输出到 target/release/
+
+      # ────────────────────────────────────────────────────
+      # 7. 打包 Linux 可执行文件（仅在推送 tag 时执行）
+      # ────────────────────────────────────────────────────
       - name: Package (Linux)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           mkdir -p dist
+          # 复制编译好的可执行文件到 dist 目录
           cp target/release/zero2prod dist/
+          # 打包为 tar.gz，并在文件名中包含 tag 名称和平台标识
           tar -czf zero2prod-${{ github.ref_name }}-linux-x86_64.tar.gz -C dist zero2prod
 
+      # ────────────────────────────────────────────────────
+      # 8. 上传 Linux 包到 GitHub Release（仅在推送 tag 时执行）
+      # ────────────────────────────────────────────────────
       - name: Upload Linux Artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: zero2prod-${{ github.ref_name }}-linux-x86_64.tar.gz
+          # 将前面生成的 tar.gz 作为 Release 资产上传
 
-  # Windows 构建与发布
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Windows 平台：仅在推送 tag 时构建、打包、发布
+  # ─────────────────────────────────────────────────────────────────────────────
   windows:
     runs-on: windows-latest
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
+      # ────────────────────────────────────────────────────
+      # 1. 检出仓库代码
+      # ────────────────────────────────────────────────────
       - name: Checkout repository
-      - uses: actions/checkout@v3
+        uses: actions/checkout@v3
 
+      # ────────────────────────────────────────────────────
+      # 2. 构建 Release 可执行文件（Windows）
+      # ────────────────────────────────────────────────────
       - name: Build (Windows)
         run: cargo build --release
+        # 在 Windows Runner 上生成 target\release\zero2prod.exe
 
+      # ────────────────────────────────────────────────────
+      # 3. 打包 Windows 可执行文件
+      # ────────────────────────────────────────────────────
       - name: Package (Windows)
         run: |
           mkdir dist
-          cp target/release/zero2prod.exe dist/
-          Compress-Archive -Path dist/zero2prod.exe -DestinationPath zero2prod-${{ github.ref_name }}-windows-x86_64.zip
+          # 复制 Windows 可执行文件到 dist 目录
+          Copy-Item target\release\zero2prod.exe dist\
+          # 使用 PowerShell 自带的 Compress-Archive 将可执行文件打包为 ZIP
+          Compress-Archive -Path dist\zero2prod.exe -DestinationPath zero2prod-${{ github.ref_name }}-windows-x86_64.zip
 
+      # ────────────────────────────────────────────────────
+      # 4. 上传 Windows 包到 GitHub Release
+      # ────────────────────────────────────────────────────
       - name: Upload Windows Artifact
         uses: softprops/action-gh-release@v1
         with:
           files: zero2prod-${{ github.ref_name }}-windows-x86_64.zip
 
-  # macOS 构建与发布
+  # ─────────────────────────────────────────────────────────────────────────────
+  # macOS 平台：仅在推送 tag 时构建、打包、发布
+  # ─────────────────────────────────────────────────────────────────────────────
   mac:
     runs-on: macos-latest
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
+      # ────────────────────────────────────────────────────
+      # 1. 检出仓库代码
+      # ────────────────────────────────────────────────────
       - name: Checkout repository
-      - uses: actions/checkout@v3
+        uses: actions/checkout@v3
 
+      # ────────────────────────────────────────────────────
+      # 2. 构建 Release 可执行文件（macOS）
+      # ────────────────────────────────────────────────────
       - name: Build (macOS)
         run: cargo build --release
+        # 在 macOS Runner 上生成 target/release/zero2prod
 
+      # ────────────────────────────────────────────────────
+      # 3. 打包 macOS 可执行文件
+      # ────────────────────────────────────────────────────
       - name: Package (macOS)
         run: |
           mkdir -p dist
+          # 复制可执行文件到 dist 目录
           cp target/release/zero2prod dist/
+          # 打包为 tar.gz，文件名包括 tag 名称和平台标识
           tar -czf zero2prod-${{ github.ref_name }}-macos-x86_64.tar.gz -C dist zero2prod
 
+      # ────────────────────────────────────────────────────
+      # 4. 上传 macOS 包到 GitHub Release
+      # ────────────────────────────────────────────────────
       - name: Upload macOS Artifact
         uses: softprops/action-gh-release@v1
         with:
