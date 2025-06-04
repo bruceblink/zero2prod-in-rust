@@ -31,12 +31,12 @@ jobs:
           - 5432:5432                       # 将容器的 5432 端口映射到宿主机 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
-                                           # 健康检查：确认 Postgres 准备就绪
-          --health-interval 10s             # 每 10 秒检查一次
-          --health-timeout 5s               # 超时时间 5 秒
-          --health-retries 5                # 重试 5 次直到成功
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
+      # 测试和迁移时会用到
       DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
       # 测试、迁移阶段连接数据库所用的环境变量
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
