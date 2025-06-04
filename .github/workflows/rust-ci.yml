@@ -1,16 +1,19 @@
-name: Rust CI
+name: Rust CI & Release
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    # 常规情况：push 到 main 分支时触发
+    branches:
+      - main
+    # 推送 tag（例如 v1.2.3）时也触发
+    tags:
+      - 'v*'
 
 jobs:
   ci:
     runs-on: ubuntu-latest
 
-    # 声明一个 PostgreSQL 服务，用于运行集成测试
+    # 如果需要运行集成测试，请保留以下 Postgres 服务
     services:
       postgres:
         image: postgres:latest
@@ -26,24 +29,36 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    # 全局环境变量，测试时会使用这条 URL 连接到上面那台 Postgres
     env:
+      # 测试和迁移时会用到
       DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+      # 用于执行发布、上传资产
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: Checkout code
+      # ────────────────────────────────────────────────────────────────────────
+      # 1. 检出仓库代码
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Rust toolchain
+      # ────────────────────────────────────────────────────────────────────────
+      # 2. 设置 Rust 工具链
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Set up Rust
         uses: actions/setup-rust@v1
         with:
-          toolchain: stable
+          rust-version: stable
 
-      # 1. 安装 sqlx-cli，用于执行迁移
+      # ────────────────────────────────────────────────────────────────────────
+      # 3. 安装 sqlx-cli（仅在需要跑迁移时使用）
+      # ────────────────────────────────────────────────────────────────────────
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
-      # 2. 等待 Postgres 就绪
+      # ────────────────────────────────────────────────────────────────────────
+      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
+      # ────────────────────────────────────────────────────────────────────────
       - name: Wait for Postgres to be ready
         run: |
           for i in {1..10}; do
@@ -56,36 +71,55 @@ jobs:
             fi
           done
 
-      # 3. 创建数据库 & 运行迁移
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. 创建数据库并运行迁移（仅在集成测试场景）
+      # ────────────────────────────────────────────────────────────────────────
       - name: Create database & run migrations
-        env:
-          DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
         run: |
-          # 如果数据库已存在则忽略错误
           sqlx database create || echo "database already exists"
           sqlx migrate run
 
-      # 4. 运行测试（包括集成测试）
+      # ────────────────────────────────────────────────────────────────────────
+      # 6. 运行测试（包括单元和集成测试）
+      # ────────────────────────────────────────────────────────────────────────
       - name: Run tests
-        env:
-          DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
         run: cargo test --verbose
 
-      # 5. 如果所有测试都通过，再进行 Release 打包
+      # ────────────────────────────────────────────────────────────────────────
+      # 7. 构建 Release 可执行文件
+      # ────────────────────────────────────────────────────────────────────────
       - name: Build (release)
         run: cargo build --release
 
-      # 6. 打包 Release 二进制
+      # ────────────────────────────────────────────────────────────────────────
+      # 8.（仅在 tag 推送时）打包可执行文件
+      # ────────────────────────────────────────────────────────────────────────
       - name: Package binary
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           mkdir -p package
-          # 假设可执行文件名为 zero2prod，位于 target/release/
           cp target/release/zero2prod package/
-          tar -czf zero2prod.tar.gz -C package zero2prod
+          tar -czf zero2prod-${{ github.ref_name }}.tar.gz -C package zero2prod
 
-      # 7. 上传打包产物
+      # ────────────────────────────────────────────────────────────────────────
+      # 9.（仅在 tag 推送时）上传打包产物到 workflow Artifacts
+      # ────────────────────────────────────────────────────────────────────────
       - name: Upload artifact
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: newsletter-binary
-          path: zero2prod.tar.gz
+          name: zero2prod-${{ github.ref_name }}
+          path: zero2prod-${{ github.ref_name }}.tar.gz
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 10.（仅在 tag 推送时）创建 GitHub Release 并附加打包产物
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: zero2prod-${{ github.ref_name }}.tar.gz
