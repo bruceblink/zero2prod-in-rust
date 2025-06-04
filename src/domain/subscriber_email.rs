@@ -1,13 +1,13 @@
 use validator::ValidateEmail;
+
 #[derive(Debug)]
 pub struct SubscriberEmail(String);
 
-
 impl SubscriberEmail {
-    pub fn parser(s: String) -> Result<SubscriberEmail, String> {
-        if ValidateEmail::validate_email(&s) {
+    pub fn parse(s: String) -> Result<SubscriberEmail, String> {
+        if s.validate_email() {
             Ok(Self(s))
-        }else {
+        } else {
             Err(format!("{} is not a valid subscriber email.", s))
         }
     }
@@ -19,40 +19,35 @@ impl AsRef<str> for SubscriberEmail {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::SubscriberEmail;
-    use claim::{assert_err, assert_ok};
-    use fake::Fake;
+    use claims::{assert_err, assert_ok};
     use fake::faker::internet::en::SafeEmail;
+    use fake::Fake;
 
     #[test]
     fn empty_string_is_rejected() {
         let email = "".to_string();
-        assert_err!(SubscriberEmail::parser(email));
+        assert_err!(SubscriberEmail::parse(email));
     }
 
     #[test]
     fn email_missing_at_symbol_is_rejected() {
-        let email = "ursuladomain".to_string();
-        assert_err!(SubscriberEmail::parser(email));
+        let email = "ursuladomain.com".to_string();
+        assert_err!(SubscriberEmail::parse(email));
     }
 
     #[test]
     fn email_missing_subject_is_rejected() {
         let email = "@domain.com".to_string();
-        assert_err!(SubscriberEmail::parser(email));
+        assert_err!(SubscriberEmail::parse(email));
     }
 
     #[test]
     fn email_correct() {
-        let email = "123@gmail.com".to_string();
-        assert_ok!(SubscriberEmail::parser(email));
-    }
-
-    #[test]
-    fn valid_email_are_passed_successfully() {
         let email = SafeEmail().fake();
-        claim::assert_ok!(SubscriberEmail::parser(email));
+        assert_ok!(SubscriberEmail::parse(email));
     }
 
 }
