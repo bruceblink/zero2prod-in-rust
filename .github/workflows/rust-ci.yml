@@ -1,4 +1,3 @@
-# .github/workflows/rust-ci.yml
 name: Rust CI
 
 on:
@@ -8,32 +7,27 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
 
-    # 声明一个 PostgreSQL 服务
+    # 声明一个 PostgreSQL 服务，用于运行集成测试
     services:
       postgres:
         image: postgres:latest
-        # 下面 ENV 变量会在容器内部生效，用来初始化数据库
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
           POSTGRES_DB: newsletter
-        # 把容器的 5432 暴露给宿主机
         ports:
           - 5432:5432
-        # 加个 Health check，等数据库 ready 了再往下跑
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
 
-    # 把 DATABASE_URL 设成刚才那份服务的地址
+    # 全局环境变量，测试时会使用这条 URL 连接到上面那台 Postgres
     env:
-      # 这里 host 可以写 localhost 或者 127.0.0.1，
-      # 因为 services 里 mapping 了 5432:5432
       DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
 
     steps:
@@ -45,11 +39,16 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Install sqlx-cli (可选，用来跑迁移)
+      # 1. 编译（Debug 模式）
+      - name: Build (debug)
+        run: cargo build
+
+      # 2. 安装 sqlx-cli，用于执行迁移
+      - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
+      # 3. 等待 Postgres 就绪
       - name: Wait for Postgres to be ready
-        # 因为刚启动的 postgres 服务还需要几秒钟才能完全可用
         run: |
           for i in {1..10}; do
             if pg_isready -h localhost -U postgres; then
@@ -61,18 +60,36 @@ jobs:
             fi
           done
 
-      - name: Create test database & run migrations
-        # 如果数据库还没创建表，需要先跑迁移
+      # 4. 创建数据库 & 运行迁移
+      - name: Create database & run migrations
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
         run: |
-          # （1）建库（如果 migrations 里已经包含 CREATE DATABASE，这步可省略）
-          # 注意：如果你在测试里自己对 database_name 做了随机更改，这里只需要跑迁移即可
-          sqlx database create
+          # 如果数据库已存在则忽略错误
+          sqlx database create || echo "database already exists"
           sqlx migrate run
 
+      # 5. 运行测试（包括集成测试）
       - name: Run tests
         env:
-          # 确保测试时也能拿到同一个 DATABASE_URL
           DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
         run: cargo test --verbose
+
+      # 6. 如果所有测试都通过，再进行 Release 打包
+      - name: Build (release)
+        run: cargo build --release
+
+      # 7. 打包 Release 二进制
+      - name: Package binary
+        run: |
+          mkdir -p package
+          # 假设可执行文件名为 newsletter，位于 target/release/
+          cp target/release/newsletter package/
+          tar -czf newsletter.tar.gz -C package newsletter
+
+      # 8. 上传打包产物
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: newsletter-binary
+          path: newsletter.tar.gz
