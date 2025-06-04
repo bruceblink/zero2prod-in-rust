@@ -39,15 +39,11 @@ jobs:
         with:
           toolchain: stable
 
-      # 1. 编译（Debug 模式）
-      - name: Build (debug)
-        run: cargo build
-
-      # 2. 安装 sqlx-cli，用于执行迁移
+      # 1. 安装 sqlx-cli，用于执行迁移
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
-      # 3. 等待 Postgres 就绪
+      # 2. 等待 Postgres 就绪
       - name: Wait for Postgres to be ready
         run: |
           for i in {1..10}; do
@@ -60,7 +56,7 @@ jobs:
             fi
           done
 
-      # 4. 创建数据库 & 运行迁移
+      # 3. 创建数据库 & 运行迁移
       - name: Create database & run migrations
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
@@ -69,17 +65,17 @@ jobs:
           sqlx database create || echo "database already exists"
           sqlx migrate run
 
-      # 5. 运行测试（包括集成测试）
+      # 4. 运行测试（包括集成测试）
       - name: Run tests
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
         run: cargo test --verbose
 
-      # 6. 如果所有测试都通过，再进行 Release 打包
+      # 5. 如果所有测试都通过，再进行 Release 打包
       - name: Build (release)
         run: cargo build --release
 
-      # 7. 打包 Release 二进制
+      # 6. 打包 Release 二进制
       - name: Package binary
         run: |
           mkdir -p package
@@ -87,7 +83,7 @@ jobs:
           cp target/release/newsletter package/
           tar -czf newsletter.tar.gz -C package newsletter
 
-      # 8. 上传打包产物
+      # 7. 上传打包产物
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
