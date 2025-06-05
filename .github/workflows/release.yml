@@ -1,23 +1,22 @@
 name: Cross-platform Release with cross
 
-# 触发条件：当推送以 v 开头的 tag 时触发
+# 触发条件：当推送到 main 分支或创建以 v 开头的 tag 时触发
 on:
   push:
+    branches:
+      - main        # 推送到 main 分支时运行 CI（执行测试与构建）
     tags:
-      - "v*"
+      - 'v*'         # 推送以 v 开头的 tag（如 v1.2.3）时运行 CI，也会触发发布
 
+# 在所有步骤中启用彩色输出
 env:
   CARGO_TERM_COLOR: always
-  # 发布到 GitHub Release 时需要的 Token
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # 运行时连接数据库（编译期 SQLx 宏验证）用的地址，host 为 services 中定义的 postgres
-  DATABASE_URL: postgres://postgres:password@postgres:5432/newsletter
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    # 在同一个 Runner 上启动一个 Postgres 服务容器
     services:
       postgres:
         image: postgres:15
@@ -32,6 +31,10 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+
+    env:
+      DATABASE_URL: postgres://postgres:password@postgres:5432/newsletter
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       # ────────────────────────────────────────────────────────────────────────
@@ -73,7 +76,10 @@ jobs:
       - name: Wait for Postgres to be ready
         run: |
           for i in {1..10}; do
-            pg_isready -h postgres -U postgres && break
+            if pg_isready -h postgres -U postgres; then
+              echo "Postgres is ready!"
+              break
+            fi
             echo "Waiting for Postgres..."
             sleep 2
           done
@@ -82,12 +88,8 @@ jobs:
       # 5. 创建数据库并运行 migrations
       # ────────────────────────────────────────────────────────────────────────
       - name: Create database & run migrations
-        env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
         run: |
-          # 尝试创建数据库，若已存在则忽略错误
           sqlx database create || echo "database already exists"
-          # 对新创建的库运行 migrations/ 目录下所有脚本
           sqlx migrate run
 
       # ────────────────────────────────────────────────────────────────────────
