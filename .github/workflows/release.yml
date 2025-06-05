@@ -10,17 +10,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # 使用服务名称代替localhost
-  DATABASE_URL: postgres://postgres:password@postgres:5432/newsletter
+  DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    # 关键：在容器中运行所有步骤
-    container:
-      image: ghcr.io/cross-rs/cross:v0.2.5
-      options: --network host  # 共享主机网络
 
     services:
       postgres:
@@ -41,21 +35,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Set up QEMU for cross-compilation
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v3
         with:
           path: |
-            /usr/local/cargo/registry  # cross容器中的路径
-            /usr/local/cargo/git
+            ~/.cargo/registry
+            ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Install Rust toolchain
-        run: |
-          rustup default stable
-          rustup component add rustfmt clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features postgres
@@ -63,7 +63,7 @@ jobs:
       - name: Wait for Postgres to be ready
         run: |
           for i in {1..15}; do
-            if pg_isready -h postgres -U postgres; then
+            if pg_isready -h localhost -U postgres; then
               echo "Postgres is ready!"
               break
             fi
@@ -81,24 +81,35 @@ jobs:
 
       - name: Install cross
         if: startsWith(github.ref, 'refs/tags/')
-        run: cargo install cross
+        run: |
+          cargo install cross
+          # 验证安装
+          cross --version
 
-      - name: Build (x86_64-unknown-linux-gnu)
+      - name: Build Linux target
         if: startsWith(github.ref, 'refs/tags/')
         run: cross build --release --target x86_64-unknown-linux-gnu
 
-      - name: Build (x86_64-pc-windows-gnu)
+      - name: Build Windows target
         if: startsWith(github.ref, 'refs/tags/')
-        run: cross build --release --target x86_64-pc-windows-gnu
+        run: |
+          # 添加Windows构建所需依赖
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64
+          cross build --release --target x86_64-pc-windows-gnu
 
-      - name: Build (x86_64-apple-darwin)
+      - name: Build macOS target
         if: startsWith(github.ref, 'refs/tags/')
-        run: cross build --release --target x86_64-apple-darwin
+        run: |
+          # 添加macOS构建所需依赖
+          sudo apt-get update
+          sudo apt-get install -y clang llvm-dev libclang-dev libssl-dev
+          cross build --release --target x86_64-apple-darwin
 
       - name: Package Binaries
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          mkdir dist
+          mkdir -p dist
           cp target/x86_64-unknown-linux-gnu/release/zero2prod dist/zero2prod-linux
           cp target/x86_64-pc-windows-gnu/release/zero2prod.exe dist/zero2prod-windows.exe
           cp target/x86_64-apple-darwin/release/zero2prod dist/zero2prod-macos
