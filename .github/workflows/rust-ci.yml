@@ -158,9 +158,58 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v3
+      # 2. 缓存 Cargo 的依赖与编译结果
+      #
+      #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
+      #  - ~/.cargo/git           包含 Git 依赖的缓存
+      #  - target                  包含编译产物（多个配置：debug、release、测试二进制等）
+      #
+      # 这里的 key 使用 Cargo.lock 的哈希，确保当 lockfile 变动时才重新拉依赖。
+      # restore-keys 保证在 lockfile 未改变时能命中回退缓存。
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       # ────────────────────────────────────────────────────────────────────────
-      # 2. 构建 Release 可执行文件（Windows）
+      # 3. 安装 sqlx-cli（仅在需要跑迁移时使用）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Wait for Postgres to be ready
+        run: |
+          for i in {1..10}; do
+            if pg_isready -h localhost -U postgres; then
+              echo "Postgres is ready!"
+              break
+            else
+              echo "Waiting for Postgres..."
+              sleep 2
+            fi
+          done
+
+      # ────────────────────────────────────────────────────
+      # 4. 创建数据库并运行迁移（仅在集成测试场景）
+      # ────────────────────────────────────────────────────
+      - name: Create database & run migrations
+        run: |
+          # 尝试创建数据库，若已存在则忽略错误
+          sqlx database create || echo "database already exists"
+          # 对新创建的库运行 migrations/ 目录下所有迁移脚本
+          sqlx migrate run
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. 构建 Release 可执行文件（Windows）
       #
       # 说明：
       #  - 同样利用上面 Linux 任务缓存的 target 目录（跨 Runner 不共享缓存，Windows 自己会在首次构建时从 crates.io 拉依赖并编译）
@@ -170,7 +219,7 @@ jobs:
         run: cargo build --release
 
       # ────────────────────────────────────────────────────────────────────────
-      # 3. 打包 Windows 可执行文件
+      # 6. 打包 Windows 可执行文件
       # ────────────────────────────────────────────────────────────────────────
       - name: Package (Windows)
         run: |
@@ -179,7 +228,7 @@ jobs:
           Compress-Archive -Path dist\zero2prod.exe -DestinationPath zero2prod-${{ github.ref_name }}-windows-x86_64.zip
 
       # ────────────────────────────────────────────────────────────────────────
-      # 4. 上传 Windows 包到 GitHub Release
+      # 7. 上传 Windows 包到 GitHub Release
       # ────────────────────────────────────────────────────────────────────────
       - name: Upload Windows Artifact
         uses: softprops/action-gh-release@v1
@@ -199,15 +248,64 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v3
+      # 2. 缓存 Cargo 的依赖与编译结果
+      #
+      #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
+      #  - ~/.cargo/git           包含 Git 依赖的缓存
+      #  - target                  包含编译产物（多个配置：debug、release、测试二进制等）
+      #
+      # 这里的 key 使用 Cargo.lock 的哈希，确保当 lockfile 变动时才重新拉依赖。
+      # restore-keys 保证在 lockfile 未改变时能命中回退缓存。
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       # ────────────────────────────────────────────────────────────────────────
-      # 2. 构建 Release 可执行文件（macOS）
+      # 3. 安装 sqlx-cli（仅在需要跑迁移时使用）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Wait for Postgres to be ready
+        run: |
+          for i in {1..10}; do
+            if pg_isready -h localhost -U postgres; then
+              echo "Postgres is ready!"
+              break
+            else
+              echo "Waiting for Postgres..."
+              sleep 2
+            fi
+          done
+
+      # ────────────────────────────────────────────────────
+      # 4. 创建数据库并运行迁移（仅在集成测试场景）
+      # ────────────────────────────────────────────────────
+      - name: Create database & run migrations
+        run: |
+          # 尝试创建数据库，若已存在则忽略错误
+          sqlx database create || echo "database already exists"
+          # 对新创建的库运行 migrations/ 目录下所有迁移脚本
+          sqlx migrate run
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. 构建 Release 可执行文件（macOS）
       # ────────────────────────────────────────────────────────────────────────
       - name: Build (macOS)
         run: cargo build --release
 
       # ────────────────────────────────────────────────────────────────────────
-      # 3. 打包 macOS 可执行文件
+      # 6. 打包 macOS 可执行文件
       # ────────────────────────────────────────────────────────────────────────
       - name: Package (macOS)
         run: |
@@ -216,7 +314,7 @@ jobs:
           tar -czf zero2prod-${{ github.ref_name }}-macos-x86_64.tar.gz -C dist zero2prod
 
       # ────────────────────────────────────────────────────────────────────────
-      # 4. 上传 macOS 包到 GitHub Release
+      # 7. 上传 macOS 包到 GitHub Release
       # ────────────────────────────────────────────────────────────────────────
       - name: Upload macOS Artifact
         uses: softprops/action-gh-release@v1
