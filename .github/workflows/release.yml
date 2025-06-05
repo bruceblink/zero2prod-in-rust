@@ -1,18 +1,17 @@
 name: Cross-platform Release with cross
 
-# 触发条件：当推送到 main 分支或创建以 v 开头的 tag 时触发
 on:
   push:
     branches:
-      - main        # 推送到 main 分支时运行 CI（执行测试与构建）
+      - main
     tags:
-      - 'v*'         # 推送以 v 开头的 tag（如 v1.2.3）时运行 CI，也会触发发布
+      - 'v*'
 
-# 在所有步骤中启用彩色输出
 env:
   CARGO_TERM_COLOR: always
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+  # 使用服务容器名称代替localhost
+  DATABASE_URL: postgres://postgres:password@postgres:5432/newsletter
 
 jobs:
   build:
@@ -32,24 +31,18 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+        # 添加容器名称，用于网络访问
+        container-name: postgres
+
+    # 关键：配置容器网络
+    container:
+      image: ghcr.io/cross-rs/cross:v0.2.5
+      options: --network container:postgres
 
     steps:
-      # ────────────────────────────────────────────────────────────────────────
-      # 1. 检出仓库代码
-      # ────────────────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 2. 缓存 Cargo registry 与编译产物
-      #
-      #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
-      #  - ~/.cargo/git           包含 Git 依赖缓存
-      #  - target                  包含编译产物（debug、release、测试二进制等）
-      #
-      # 这里用 Cargo.lock 的哈希做 key，确保只有当锁文件变动时才重新拉依赖。
-      # restore-keys 保证在锁文件未变时能命中旧缓存。
-      # ────────────────────────────────────────────────────────────────────────
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v3
         with:
@@ -72,7 +65,7 @@ jobs:
       - name: Wait for Postgres to be ready
         run: |
           for i in {1..10}; do
-            if pg_isready -h localhost -U postgres; then
+            if pg_isready -h postgres -U postgres; then
               echo "Postgres is ready!"
               break
             fi
@@ -87,14 +80,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --verbose
-
-      - name: Build custom cross image
-        if: startsWith(github.ref, 'refs/tags/')
-        run: docker build -f Dockerfile.cross -t custom-cross:latest .
-
-      - name: Install cross
-        if: startsWith(github.ref, 'refs/tags/')
-        run: cargo install cross
 
       - name: Build (x86_64-unknown-linux-gnu)
         if: startsWith(github.ref, 'refs/tags/')
