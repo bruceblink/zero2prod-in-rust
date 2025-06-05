@@ -25,6 +25,7 @@ jobs:
           POSTGRES_DB: newsletter
         ports:
           - 5432:5432
+        # GitHub Actions 会等待此健康检查通过后才开始作业步骤
         options: >-
           --health-cmd="pg_isready -U postgres"
           --health-interval=10s
@@ -60,16 +61,7 @@ jobs:
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features postgres
 
-      - name: Wait for Postgres to be ready
-        run: |
-          for i in {1..15}; do
-            if pg_isready -h localhost -U postgres; then
-              echo "Postgres is ready!"
-              break
-            fi
-            echo "Waiting for Postgres (attempt $i/15)..."
-            sleep 3
-          done
+      # 已移除自定义的 "Wait for Postgres" 脚本，因为 service health check 已足够
 
       - name: Run migrations
         run: |
@@ -101,7 +93,10 @@ jobs:
       - name: Build macOS target
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          # 添加macOS构建所需依赖
+          # 添加macOS构建所需的主机依赖 (cross 可能需要主机上的 clang)
+          # 注意: 成功的 macOS 交叉编译严重依赖于 cross 使用的 Docker 镜像中包含的 SDK。
+          # 如果此步骤失败，请检查 cross 文档，考虑在 Cross.toml 中指定 macOS 镜像，
+          # 或将 macOS 构建移至 macos-latest runner。
           sudo apt-get update
           sudo apt-get install -y clang llvm-dev libclang-dev libssl-dev
           cross build --release --target x86_64-apple-darwin
@@ -110,6 +105,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           mkdir -p dist
+          # 假设您的可执行文件名为 zero2prod (根据 workflow 中的 cp 命令)
+          # 如果您的项目可执行文件名不同，请相应修改这里的 'zero2prod'
           cp target/x86_64-unknown-linux-gnu/release/zero2prod dist/zero2prod-linux
           cp target/x86_64-pc-windows-gnu/release/zero2prod.exe dist/zero2prod-windows.exe
           cp target/x86_64-apple-darwin/release/zero2prod dist/zero2prod-macos
