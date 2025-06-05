@@ -1,0 +1,52 @@
+name: Cross-platform Release with cross
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross
+        run: cargo install cross
+
+      - name: Build (x86_64-unknown-linux-gnu)
+        run: cross build --release --target x86_64-unknown-linux-gnu
+
+      - name: Build (x86_64-pc-windows-gnu)
+        run: cross build --release --target x86_64-pc-windows-gnu
+
+      - name: Build (x86_64-apple-darwin)
+        run: cross build --release --target x86_64-apple-darwin
+
+      - name: Package Binaries
+        run: |
+          mkdir dist
+          cp target/x86_64-unknown-linux-gnu/release/zero2prod dist/zero2prod-linux
+          cp target/x86_64-pc-windows-gnu/release/zero2prod.exe dist/zero2prod-windows.exe
+          cp target/x86_64-apple-darwin/release/zero2prod dist/zero2prod-macos
+          cd dist
+          tar -czf zero2prod-${{ github.ref_name }}-linux.tar.gz zero2prod-linux
+          zip zero2prod-${{ github.ref_name }}-windows.zip zero2prod-windows.exe
+          tar -czf zero2prod-${{ github.ref_name }}-macos.tar.gz zero2prod-macos
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/zero2prod-${{ github.ref_name }}-linux.tar.gz
+            dist/zero2prod-${{ github.ref_name }}-windows.zip
+            dist/zero2prod-${{ github.ref_name }}-macos.tar.gz
