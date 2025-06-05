@@ -25,6 +25,17 @@ mod tests {
     use claims::{assert_err, assert_ok};
     use fake::faker::internet::en::SafeEmail;
     use fake::Fake;
+    use quickcheck::Gen;
+
+    #[derive(Debug, Clone)]
+    struct ValidEmailFixture(pub String);
+
+    impl quickcheck::Arbitrary for ValidEmailFixture {
+        fn arbitrary(_g: &mut Gen) -> Self {
+            let email = SafeEmail().fake();
+            Self(email)
+        }
+    }
 
     #[test]
     fn empty_string_is_rejected() {
@@ -48,6 +59,11 @@ mod tests {
     fn email_correct() {
         let email = SafeEmail().fake();
         assert_ok!(SubscriberEmail::parse(email));
+    }
+
+    #[quickcheck_macros::quickcheck]
+    fn valid_email_are_parse_successfully(valid_email: ValidEmailFixture) -> bool {
+        SubscriberEmail::parse(valid_email.0).is_ok()
     }
 
 }
