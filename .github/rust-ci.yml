@@ -29,6 +29,7 @@ jobs:
           POSTGRES_DB: newsletter           # 容器内默认数据库名
         ports:
           - 5432:5432                       # 将容器的 5432 端口映射到宿主机 5432
+        # GitHub Actions 会等待此健康检查通过后才开始作业步骤
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -77,21 +78,6 @@ jobs:
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
-      # ────────────────────────────────────────────────────────────────────────
-      - name: Wait for Postgres to be ready
-        run: |
-          for i in {1..10}; do
-            if pg_isready -h localhost -U postgres; then
-              echo "Postgres is ready!"
-              break
-            else
-              echo "Waiting for Postgres..."
-              sleep 2
-            fi
-          done
-
       # ────────────────────────────────────────────────────
       # 4. 创建数据库并运行迁移（仅在集成测试场景）
       # ────────────────────────────────────────────────────
@@ -103,7 +89,7 @@ jobs:
           sqlx migrate run
 
       # ────────────────────────────────────────────────────────────────────────
-      # 6. 运行测试（包括单元测试与集成测试）
+      # 5. 运行测试（包括单元测试与集成测试）
       #
       # 说明：
       #  - 缓存与上一步共享 target，所以如果依赖没变化，cargo test 会直接复用已编译的 crate
@@ -114,7 +100,7 @@ jobs:
         # 执行所有测试用例，若有失败则 CI 报错
 
       # ────────────────────────────────────────────────────────────────────────
-      # 7. 构建 Release 可执行文件
+      # 6. 构建 Release 可执行文件
       #
       # 说明：
       #  - 由于 target 目录已缓存，cargo build --release 不会重头拉依赖，只会编译 release 二进制
@@ -137,7 +123,7 @@ jobs:
           tar -czf zero2prod-${{ github.ref_name }}-linux-x86_64.tar.gz -C dist zero2prod
 
       # ────────────────────────────────────────────────────────────────────────
-      # 9.（仅在推送 tag 时）上传 Linux 包到 GitHub Release
+      # 8.（仅在推送 tag 时）上传 Linux 包到 GitHub Release
       # ────────────────────────────────────────────────────────────────────────
       - name: Upload Linux Artifact
         if: startsWith(github.ref, 'refs/tags/')
@@ -152,16 +138,15 @@ jobs:
     runs-on: windows-latest
     if: startsWith(github.ref, 'refs/tags/')
 
-    # 如果需要在集成测试里连接数据库，在同一个 Runner 上启动一个 Postgres 容器
     services:
       postgres:
         image: postgres:latest
         env:
-          POSTGRES_USER: postgres          # 容器内 Postgres 用户名
-          POSTGRES_PASSWORD: password      # 容器内 Postgres 密码
-          POSTGRES_DB: newsletter           # 容器内默认数据库名
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: newsletter
         ports:
-          - 5432:5432                       # 将容器的 5432 端口映射到宿主机 5432
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -169,11 +154,8 @@ jobs:
           --health-retries 5
 
     env:
-      # 测试和迁移时会用到
       DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
-      # 测试、迁移阶段连接数据库所用的环境变量
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # 用于发布 Release 的 GitHub Token，自动注入，无需手动配置
 
     steps:
       # ────────────────────────────────────────────────────────────────────────
@@ -181,14 +163,9 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v3
+
+      # ────────────────────────────────────────────────────────────────────────
       # 2. 缓存 Cargo 的依赖与编译结果
-      #
-      #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
-      #  - ~/.cargo/git           包含 Git 依赖的缓存
-      #  - target                  包含编译产物（多个配置：debug、release、测试二进制等）
-      #
-      # 这里的 key 使用 Cargo.lock 的哈希，确保当 lockfile 变动时才重新拉依赖。
-      # restore-keys 保证在 lockfile 未改变时能命中回退缓存。
       # ────────────────────────────────────────────────────────────────────────
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v3
@@ -207,43 +184,16 @@ jobs:
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
-      # ────────────────────────────────────────────────────────────────────────
-      - name: Wait for Postgres to be ready
-        run: |
-          for i in $(seq 1 10); do
-            if pg_isready - |
-              i=0
-              while [ $i -lt 10 ]; do
-                if pg_ish localhost -U postgres; then
-              echo "Postgres isready -h localhost -U postgres; then
-                  echo " ready!"
-              break
-            else
-              echo "Waiting for PostgresPostgres is ready!"
-                  break
-                else
-                  echo "..."
-              sleep 2
-            fi
-          done
-
       # ────────────────────────────────────────────────────
       # 4. 创建数据库并运行迁移（仅在集成测试场景）
       # ────────────────────────────────────────────────────
       - name: Create database & run migrations
         run: |
-          # 尝试创建数据库，若已存在则忽略错误
           sqlx database create || echo "database already exists"
-          # 对新创建的库运行 migrations/ 目录下所有迁移脚本
           sqlx migrate run
+
       # ────────────────────────────────────────────────────────────────────────
       # 5. 构建 Release 可执行文件（Windows）
-      #
-      # 说明：
-      #  - 同样利用上面 Linux 任务缓存的 target 目录（跨 Runner 不共享缓存，Windows 自己会在首次构建时从 crates.io 拉依赖并编译）
-      #  - 如果需要缩短第二次构建，可在此处单独添加 Windows 缓存步骤
       # ────────────────────────────────────────────────────────────────────────
       - name: Build (Windows)
         run: cargo build --release
@@ -272,20 +222,34 @@ jobs:
     runs-on: macos-latest
     if: startsWith(github.ref, 'refs/tags/')
 
+    services: # 为 macOS 添加了 PostgreSQL 服务
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: newsletter
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env: # 为 macOS 添加了 DATABASE_URL
+      DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
       # ────────────────────────────────────────────────────────────────────────
       # 1. 检出仓库代码
       # ────────────────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v3
+
+      # ────────────────────────────────────────────────────────────────────────
       # 2. 缓存 Cargo 的依赖与编译结果
-      #
-      #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
-      #  - ~/.cargo/git           包含 Git 依赖的缓存
-      #  - target                  包含编译产物（多个配置：debug、release、测试二进制等）
-      #
-      # 这里的 key 使用 Cargo.lock 的哈希，确保当 lockfile 变动时才重新拉依赖。
-      # restore-keys 保证在 lockfile 未改变时能命中回退缓存。
       # ────────────────────────────────────────────────────────────────────────
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v3
@@ -304,30 +268,14 @@ jobs:
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
-      # ────────────────────────────────────────────────────────────────────────
-      - name: Wait for Postgres to be ready
-        run: |
-          for i in {1..10}; do
-            if pg_isready -h localhost -U postgres; then
-              echo "Postgres is ready!"
-              break
-            else
-              echo "Waiting for Postgres..."
-              sleep 2
-            fi
-          done
-
       # ────────────────────────────────────────────────────
       # 4. 创建数据库并运行迁移（仅在集成测试场景）
       # ────────────────────────────────────────────────────
       - name: Create database & run migrations
         run: |
-          # 尝试创建数据库，若已存在则忽略错误
           sqlx database create || echo "database already exists"
-          # 对新创建的库运行 migrations/ 目录下所有迁移脚本
           sqlx migrate run
+
       # ────────────────────────────────────────────────────────────────────────
       # 5. 构建 Release 可执行文件（macOS）
       # ────────────────────────────────────────────────────────────────────────
