@@ -6,7 +6,7 @@ on:
     branches:
       - main        # 推送到 main 分支时运行 CI（执行测试与构建）
     tags:
-      - 'v*'         # 推送以 v 开头的 tag（如 v1.2.3）时运行 CI，也会触发发布
+      - 'v*'          # 推送以 v 开头的 tag（如 v1.2.3）时运行 CI，也会触发发布
 
 # 在所有步骤中启用彩色输出
 env:
@@ -24,11 +24,11 @@ jobs:
       postgres:
         image: postgres:latest
         env:
-          POSTGRES_USER: postgres          # 容器内 Postgres 用户名
-          POSTGRES_PASSWORD: password      # 容器内 Postgres 密码
-          POSTGRES_DB: newsletter           # 容器内默认数据库名
+          POSTGRES_USER: postgres      # 容器内 Postgres 用户名
+          POSTGRES_PASSWORD: password    # 容器内 Postgres 密码
+          POSTGRES_DB: newsletter        # 容器内默认数据库名
         ports:
-          - 5432:5432                       # 将容器的 5432 端口映射到宿主机 5432
+          - 5432:5432                  # 将容器的 5432 端口映射到宿主机 5432
         # GitHub Actions 会等待此健康检查通过后才开始作业步骤
         options: >-
           --health-cmd "pg_isready -U postgres"
@@ -56,7 +56,7 @@ jobs:
       #
       #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
       #  - ~/.cargo/git           包含 Git 依赖的缓存
-      #  - target                  包含编译产物（多个配置：debug、release、测试二进制等）
+      #  - target                 包含编译产物（多个配置：debug、release、测试二进制等）
       #
       # 这里的 key 使用 Cargo.lock 的哈希，确保当 lockfile 变动时才重新拉依赖。
       # restore-keys 保证在 lockfile 未改变时能命中回退缓存。
@@ -203,7 +203,7 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────
       - name: Package (Windows)
         run: |
-          mkdir dist
+          New-Item -ItemType Directory -Force -Path dist
           Copy-Item target\release\zero2prod.exe dist\
           Compress-Archive -Path dist\zero2prod.exe -DestinationPath zero2prod-${{ github.ref_name }}-windows-x86_64.zip
 
@@ -289,6 +289,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/zero2prod dist/
+          chmod +x dist/zero2prod # 确保可执行文件有执行权限
           tar -czf zero2prod-${{ github.ref_name }}-macos-x86_64.tar.gz -C dist zero2prod
 
       # ────────────────────────────────────────────────────────────────────────
