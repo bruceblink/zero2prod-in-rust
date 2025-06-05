@@ -1,5 +1,6 @@
 name: Cross-platform Release with cross
 
+# 触发条件：当推送以 v 开头的 tag 时触发
 on:
   push:
     tags:
@@ -7,40 +8,48 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # 发布到 GitHub Release 时需要的 Token
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # 运行时连接数据库（编译期 SQLx 宏验证）用的地址，host 为 services 中定义的 postgres
+  DATABASE_URL: postgres://postgres:password@postgres:5432/newsletter
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    # 在同一个 Runner 上启动一个 Postgres 服务容器
     services:
       postgres:
         image: postgres:15
-        ports:
-          - 5432:5432
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
           POSTGRES_DB: newsletter
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd="pg_isready -U postgres"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
 
-    env:
-      DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
-      # 测试、迁移阶段连接数据库所用的环境变量
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
-      - name: Checkout
+      # ────────────────────────────────────────────────────────────────────────
+      # 1. 检出仓库代码
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
+      # ────────────────────────────────────────────────────────────────────────
+      # 2. 缓存 Cargo registry 与编译产物
+      #
+      #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
+      #  - ~/.cargo/git           包含 Git 依赖缓存
+      #  - target                  包含编译产物（debug、release、测试二进制等）
+      #
+      # 这里用 Cargo.lock 的哈希做 key，确保只有当锁文件变动时才重新拉依赖。
+      # restore-keys 保证在锁文件未变时能命中旧缓存。
+      # ────────────────────────────────────────────────────────────────────────
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v3
         with:
@@ -52,28 +61,46 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Install SQLx CLI (for migration)
+      # ────────────────────────────────────────────────────────────────────────
+      # 3. 安装 sqlx-cli（用于运行迁移）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features postgres
 
+      # ────────────────────────────────────────────────────────────────────────
+      # 4. 等待 Postgres 服务就绪（仅在集成测试场景）
+      # ────────────────────────────────────────────────────────────────────────
       - name: Wait for Postgres to be ready
         run: |
           for i in {1..10}; do
-            pg_isready -h localhost -U postgres && break
+            pg_isready -h postgres -U postgres && break
+            echo "Waiting for Postgres..."
             sleep 2
           done
 
-      - name: Run migrations
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. 创建数据库并运行 migrations
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Create database & run migrations
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
         run: |
           # 尝试创建数据库，若已存在则忽略错误
           sqlx database create || echo "database already exists"
-          # 对新创建的库运行 migrations/ 目录下所有迁移脚本
+          # 对新创建的库运行 migrations/ 目录下所有脚本
           sqlx migrate run
 
+      # ────────────────────────────────────────────────────────────────────────
+      # 6. 安装 cross（用于交叉编译）
+      # ────────────────────────────────────────────────────────────────────────
       - name: Install cross
         run: cargo install cross
 
+      # ────────────────────────────────────────────────────────────────────────
+      # 7. 使用 cross 在 Linux 环境下交叉编译多平台二进制
+      #
+      #    由于 DATABASE_URL 指向 postgres:5432，SQLx 在编译期宏验证能正常连接到该服务。
+      # ────────────────────────────────────────────────────────────────────────
       - name: Build (x86_64-unknown-linux-gnu)
         run: cross build --release --target x86_64-unknown-linux-gnu
 
@@ -83,17 +110,29 @@ jobs:
       - name: Build (x86_64-apple-darwin)
         run: cross build --release --target x86_64-apple-darwin
 
+      # ────────────────────────────────────────────────────────────────────────
+      # 8. 打包所有构建好的二进制
+      # ────────────────────────────────────────────────────────────────────────
       - name: Package Binaries
         run: |
           mkdir dist
+          # Linux 可执行文件（不带扩展）
           cp target/x86_64-unknown-linux-gnu/release/zero2prod dist/zero2prod-linux
+          # Windows 可执行文件（.exe）
           cp target/x86_64-pc-windows-gnu/release/zero2prod.exe dist/zero2prod-windows.exe
+          # macOS 可执行文件（不带扩展）
           cp target/x86_64-apple-darwin/release/zero2prod dist/zero2prod-macos
+
           cd dist
+
+          # 打包为 tar.gz 和 zip
           tar -czf zero2prod-${{ github.ref_name }}-linux.tar.gz zero2prod-linux
           zip zero2prod-${{ github.ref_name }}-windows.zip zero2prod-windows.exe
           tar -czf zero2prod-${{ github.ref_name }}-macos.tar.gz zero2prod-macos
 
+      # ────────────────────────────────────────────────────────────────────────
+      # 9. 创建 GitHub Release 并上传所有平台的打包产物
+      # ────────────────────────────────────────────────────────────────────────
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
