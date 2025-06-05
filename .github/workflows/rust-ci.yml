@@ -1,59 +1,157 @@
 name: Rust CI & Release
 
-# 触发条件：推送到 main 分支 或 创建以 v 开头的 tag 时
+# 触发条件：当推送到 main 分支或创建以 v 开头的 tag 时触发
 on:
   push:
     branches:
-      - main
+      - main        # 推送到 main 分支时运行 CI（执行测试与构建）
     tags:
-      - 'v*'
+      - 'v*'          # 推送以 v 开头的 tag（如 v1.2.3）时运行 CI，也会触发发布
 
+# 在所有步骤中启用彩色输出
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build & Release (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    # 仅在 tag 推送时运行
-    if: startsWith(github.ref, 'refs/tags/')
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            cache_registry: ~/.cargo/registry
-            cache_git:     ~/.cargo/git
-            shell: bash
-            ext: tar.gz
-            target: linux-x86_64
-          - os: windows-latest
-            # Windows 下的路径要用引号包裹
-            cache_registry: "C:\\Users\\runneradmin\\.cargo\\registry"
-            cache_git:      "C:\\Users\\runneradmin\\.cargo\\git"
-            shell: powershell
-            ext: zip
-            target: windows-x86_64
-          - os: macos-latest
-            cache_registry: ~/.cargo/registry
-            cache_git:     ~/.cargo/git
-            shell: bash
-            ext: tar.gz
-            target: macos-x86_64
+  # ───────────────────────────────
+  # Linux 平台：构建、测试、打包、发布
+  # ───────────────────────────────
+  linux:
+    runs-on: ubuntu-latest
 
+    # 如果需要在集成测试里连接数据库，在同一个 Runner 上启动一个 Postgres 容器
     services:
       postgres:
         image: postgres:latest
+        env:
+          POSTGRES_USER: postgres      # 容器内 Postgres 用户名
+          POSTGRES_PASSWORD: password    # 容器内 Postgres 密码
+          POSTGRES_DB: newsletter        # 容器内默认数据库名
+        ports:
+          - 5432:5432                  # 将容器的 5432 端口映射到宿主机 5432
+        # GitHub Actions 会等待此健康检查通过后才开始作业步骤
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+    env:
+      # 测试和迁移时会用到
+      DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+      # 测试、迁移阶段连接数据库所用的环境变量
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 用于发布 Release 的 GitHub Token，自动注入，无需手动配置
+
+    steps:
+      # ────────────────────────────────────────────────────
+      # 1. 检出仓库代码
+      # ────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        # 将当前仓库代码拉取到 Runner 上
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 2. 缓存 Cargo 的依赖与编译结果
+      #
+      #  - ~/.cargo/registry      包含已下载的 crates.io 索引与 crate 源码
+      #  - ~/.cargo/git           包含 Git 依赖的缓存
+      #  - target                 包含编译产物（多个配置：debug、release、测试二进制等）
+      #
+      # 这里的 key 使用 Cargo.lock 的哈希，确保当 lockfile 变动时才重新拉依赖。
+      # restore-keys 保证在 lockfile 未改变时能命中回退缓存。
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 3. 安装 sqlx-cli（仅在需要跑迁移时使用）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      # ────────────────────────────────────────────────────
+      # 4. 创建数据库并运行迁移（仅在集成测试场景）
+      # ────────────────────────────────────────────────────
+      - name: Create database & run migrations
+        run: |
+          # 尝试创建数据库，若已存在则忽略错误
+          sqlx database create || echo "database already exists"
+          # 对新创建的库运行 migrations/ 目录下所有迁移脚本
+          sqlx migrate run
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. 运行测试（包括单元测试与集成测试）
+      #
+      # 说明：
+      #  - 缓存与上一步共享 target，所以如果依赖没变化，cargo test 会直接复用已编译的 crate
+      #  - cargo test 会先拉取依赖、编译 debug+test 二进制，然后运行所有测试
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Run tests
+        run: cargo test --verbose
+        # 执行所有测试用例，若有失败则 CI 报错
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 6. 构建 Release 可执行文件
+      #
+      # 说明：
+      #  - 由于 target 目录已缓存，cargo build --release 不会重头拉依赖，只会编译 release 二进制
+      #  - 测试时编译过的 crate 库会被复用，可显著缩短编译时间
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Build (release)
+        run: cargo build --release
+        # 生成优化后的可执行文件，输出到 target/release/
+
+      # ────────────────────────────────────────────────────
+      # 7. 打包 Linux 可执行文件（仅在推送 tag 时执行）
+      # ────────────────────────────────────────────────────
+      - name: Package (Linux)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p dist
+          # 复制编译好的可执行文件到 dist 目录
+          cp target/release/zero2prod dist/
+          # 在文件名里包含 tag 名称和平台标识
+          tar -czf zero2prod-${{ github.ref_name }}-linux-x86_64.tar.gz -C dist zero2prod
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 8.（仅在推送 tag 时）上传 Linux 包到 GitHub Release
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Upload Linux Artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: zero2prod-${{ github.ref_name }}-linux-x86_64.tar.gz
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Windows 平台：仅在推送 tag 时构建、打包、发布
+  # ─────────────────────────────────────────────────────────────────────────────
+  windows:
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    services:
+      postgres:
+        image: postgres:latest
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
           POSTGRES_DB: newsletter
         ports:
           - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
@@ -61,88 +159,143 @@ jobs:
 
     steps:
       # ────────────────────────────────────────────────────────────────────────
-      # 1. 检出仓库
+      # 1. 检出仓库代码
       # ────────────────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v3
 
       # ────────────────────────────────────────────────────────────────────────
-      # 2. 安装并缓存 Rust 工具链
+      # 2. 缓存 Cargo 的依赖与编译结果
       # ────────────────────────────────────────────────────────────────────────
-      - name: Setup Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - name: Cache Cargo registry & build artifacts
+      - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v3
         with:
           path: |
-            ${{ matrix.cache_registry }}
-            ${{ matrix.cache_git }}
+            ~/.cargo/registry
+            ~/.cargo/git
             target
-          key: ${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ matrix.os }}-cargo-
+            ${{ runner.os }}-cargo-
 
       # ────────────────────────────────────────────────────────────────────────
-      # 3. 安装 sqlx-cli（用于数据库迁移）
+      # 3. 安装 sqlx-cli（仅在需要跑迁移时使用）
       # ────────────────────────────────────────────────────────────────────────
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
-        shell: ${{ matrix.shell }}
 
-      # ────────────────────────────────────────────────────────────────────────
-      # 4. 创建数据库并运行迁移
-      # ────────────────────────────────────────────────────────────────────────
-      - name: Create DB & Run migrations
+      # ────────────────────────────────────────────────────
+      # 4. 创建数据库并运行迁移（仅在集成测试场景）
+      # ────────────────────────────────────────────────────
+      - name: Create database & run migrations
         run: |
           sqlx database create || echo "database already exists"
           sqlx migrate run
-        shell: ${{ matrix.shell }}
 
       # ────────────────────────────────────────────────────────────────────────
-      # 5. 运行测试
+      # 5. 构建 Release 可执行文件（Windows）
       # ────────────────────────────────────────────────────────────────────────
-      - name: Run tests
-        run: cargo test --verbose
-        shell: ${{ matrix.shell }}
-
-      # ────────────────────────────────────────────────────────────────────────
-      # 6. 构建 Release 可执行文件
-      # ────────────────────────────────────────────────────────────────────────
-      - name: Build (release)
+      - name: Build (Windows)
         run: cargo build --release
-        shell: ${{ matrix.shell }}
 
       # ────────────────────────────────────────────────────────────────────────
-      # 7. 打包各平台可执行文件
+      # 6. 打包 Windows 可执行文件
       # ────────────────────────────────────────────────────────────────────────
-      # Windows 专属打包
       - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item target\release\zero2prod.exe dist\
-          Compress-Archive -Path dist\zero2prod.exe -DestinationPath zero2prod-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.ext }}
-        shell: powershell
+          Compress-Archive -Path dist\zero2prod.exe -DestinationPath zero2prod-${{ github.ref_name }}-windows-x86_64.zip
 
-      # Linux/macOS 通用打包（tar.gz）
-      - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
+      # ────────────────────────────────────────────────────────────────────────
+      # 7. 上传 Windows 包到 GitHub Release
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Upload Windows Artifact
+        uses: softprops/action-gh-release@v1
+        with:
+          files: zero2prod-${{ github.ref_name }}-windows-x86_64.zip
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # macOS 平台：仅在推送 tag 时构建、打包、发布
+  # ─────────────────────────────────────────────────────────────────────────────
+  mac:
+    runs-on: macos-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    services: # 为 macOS 添加了 PostgreSQL 服务
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: newsletter
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env: # 为 macOS 添加了 DATABASE_URL
+      DATABASE_URL: postgres://postgres:password@localhost:5432/newsletter
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      # ────────────────────────────────────────────────────────────────────────
+      # 1. 检出仓库代码
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 2. 缓存 Cargo 的依赖与编译结果
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 3. 安装 sqlx-cli（仅在需要跑迁移时使用）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      # ────────────────────────────────────────────────────
+      # 4. 创建数据库并运行迁移（仅在集成测试场景）
+      # ────────────────────────────────────────────────────
+      - name: Create database & run migrations
+        run: |
+          sqlx database create || echo "database already exists"
+          sqlx migrate run
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. 构建 Release 可执行文件（macOS）
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Build (macOS)
+        run: cargo build --release
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 6. 打包 macOS 可执行文件
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Package (macOS)
         run: |
           mkdir -p dist
           cp target/release/zero2prod dist/
-          chmod +x dist/zero2prod
-          tar -czf zero2prod-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.ext }} -C dist zero2prod
-        shell: bash
+          chmod +x dist/zero2prod # 确保可执行文件有执行权限
+          tar -czf zero2prod-${{ github.ref_name }}-macos-x86_64.tar.gz -C dist zero2prod
 
       # ────────────────────────────────────────────────────────────────────────
-      # 8. 上传 Artifact 到 GitHub Release
+      # 7. 上传 macOS 包到 GitHub Release
       # ────────────────────────────────────────────────────────────────────────
-      - name: Upload Artifact
+      - name: Upload macOS Artifact
         uses: softprops/action-gh-release@v1
         with:
-          files: zero2prod-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.ext }}
+          files: zero2prod-${{ github.ref_name }}-macos-x86_64.tar.gz
