@@ -6,9 +6,6 @@ on:
       - main
     tags:
       - 'v*'
-    paths:
-      - 'src/**'
-      - 'Cargo.toml'
     paths-ignore:
       - 'README.md'
       - '.github/**'
