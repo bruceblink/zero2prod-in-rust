@@ -2,6 +2,8 @@
 
 use reqwest::Client;
 use crate::domain::SubscriberEmail;
+
+#[derive(Clone)]
 pub struct EmailClient {
     http_client: Client,  // 存储Client实例
     base_url: String,     // 用于存储发送API请求的URL
