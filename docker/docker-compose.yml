@@ -20,9 +20,9 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       # 数据持久化
-      - /docker/postgresql/data/:/var/lib/postgresql/data/
+      - F:/docker/postgresql/data/:/var/lib/postgresql/data/
       # 日志持久化（容器内写入 /var/log/postgresql/postgresql.log）
-      - /docker/postgresql/logs/:/var/log/postgresql/
+      - F:/docker/postgresql/logs/:/var/log/postgresql/
       # 初始化脚本目录：第一次初始化时，所有 .sql/.sh 会按字母顺序执行
       - ./postgresql/initdb/:/docker-entrypoint-initdb.d/:ro  # ro表示只读
       # 自定义主配置文件
