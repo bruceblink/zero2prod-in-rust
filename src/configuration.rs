@@ -9,9 +9,10 @@ pub struct Setting {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
     // email_client
-    pub email_client: EmailClient,
+    pub email_client: EmailClientSettings,
 }
 
+#[derive(serde::Deserialize)]
 pub struct EmailClientSettings {
     pub base_url: String,
     pub sender_email: String,
