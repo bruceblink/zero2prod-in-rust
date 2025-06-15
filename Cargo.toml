@@ -12,7 +12,7 @@ name = "zero2prod"
 
 [dependencies]
 actix-web = "4"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
 serde = "1.0.115"
 config = { version = "0.14", default-features = false, features = ["yaml"] }
 sqlx = { version = "0.8", default-features = false, features = [
@@ -38,6 +38,7 @@ validator = "0.20"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.1.0"
 reqwest = { version = "0.12", default-features = false,features = ["json", "rustls-tls"] }
+wiremock = "0.6.3"
 
 [dev-dependencies]
 fake = "2.9"
