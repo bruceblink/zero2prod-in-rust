@@ -16,6 +16,8 @@ pub struct Setting {
 pub struct EmailClientSettings {
     pub base_url: String,
     pub sender_email: String,
+    // 新的密钥配置项
+    pub authorization_token: Secret<String>
 }
 
 impl EmailClientSettings {
