@@ -60,11 +60,12 @@ struct SendEmailRequest {
 
 #[cfg(test)]
 mod tests {
+    use actix_web::web::method;
     use fake::Fake;
     use fake::faker::internet::en::SafeEmail;
     use fake::faker::lorem::en::{Paragraph, Sentence};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use wiremock::matchers::any;
+    use wiremock::matchers::{header, header_exists, path};
     use crate::configuration::get_configuration;
     use crate::domain::SubscriberEmail;
     use crate::email_client::EmailClient;
@@ -76,7 +77,10 @@ mod tests {
         let configuration = get_configuration().expect("Failed to read configuration.");
         let email_client = EmailClient::new(mock_server.uri(), sender, configuration.email_client.authorization_token);
 
-        Mock::given(any())
+        Mock::given(header_exists("X-Postmark-Server-Token"))
+            .and(header("Content-Type", "application/json"))
+            .and(path("/email"))
+            .and(method("POST".parse().unwrap()))
             .respond_with(ResponseTemplate::new(200))
             .expect(1)
             .mount(&mock_server)
