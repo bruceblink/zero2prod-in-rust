@@ -33,14 +33,11 @@ tracing-log = "0.2.0"
 tracing-actix-web = "0.7"
 secrecy = { version = "0.8", features = ["serde"] }
 unicode-segmentation = "1.12.0"
-claim = "0.5.0"
 validator = "0.20"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.1.0"
 reqwest = { version = "0.12", default-features = false,features = ["json", "rustls-tls"] }
-wiremock = "0.6.3"
 
 [dev-dependencies]
 fake = "4"
-rand = "0.9"
 claims = "0.8"
