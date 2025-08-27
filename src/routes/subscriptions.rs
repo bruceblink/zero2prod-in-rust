@@ -1,9 +1,9 @@
-use actix_web::{HttpResponse, web};
-use sqlx::PgPool;
-use chrono::Utc;
-use uuid::Uuid;
-use std::convert::{TryFrom, TryInto};
 use crate::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
+use actix_web::{HttpResponse, web};
+use chrono::Utc;
+use sqlx::PgPool;
+use std::convert::{TryFrom, TryInto};
+use uuid::Uuid;
 
 #[derive(serde::Deserialize)]
 pub struct FormData {
@@ -30,9 +30,7 @@ impl TryFrom<FormData> for NewSubscriber {
         subscriber_name = %form.name
     )
 )]
-pub async fn subscribe(form: web::Form<FormData>,
-                       pool: web::Data<PgPool>) -> HttpResponse {
-
+pub async fn subscribe(form: web::Form<FormData>, pool: web::Data<PgPool>) -> HttpResponse {
     let new_subscriber = match form.0.try_into() {
         Ok(form) => form,
         Err(_) => return HttpResponse::BadRequest().finish(),
@@ -47,19 +45,24 @@ pub async fn subscribe(form: web::Form<FormData>,
     name = "Saving new subscriber details in the database",
     skip(new_subscriber, pool)
 )]
-pub async fn insert_subscriber(pool: &PgPool, new_subscriber: &NewSubscriber) -> Result<(), sqlx::Error> {
-    sqlx::query!(r#"
+pub async fn insert_subscriber(
+    pool: &PgPool,
+    new_subscriber: &NewSubscriber,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at)
         values ($1, $2, $3, $4)"#,
         Uuid::new_v4(),
         new_subscriber.email.as_ref(),
         new_subscriber.name.as_ref(),
-        Utc::now())
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to execute query: {:?}", e);
-            e
-        })?;
+        Utc::now()
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to execute query: {:?}", e);
+        e
+    })?;
     Ok(())
 }

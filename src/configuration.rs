@@ -1,7 +1,7 @@
+use crate::domain::SubscriberEmail;
 use secrecy::{ExposeSecret, Secret};
 use serde_aux::field_attributes::deserialize_number_from_string;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
-use crate::domain::SubscriberEmail;
 
 #[derive(serde::Deserialize)]
 pub struct Setting {
@@ -16,7 +16,7 @@ pub struct EmailClientSettings {
     pub base_url: String,
     pub sender_email: String,
     // 新的密钥配置项
-    pub authorization_token: Secret<String>
+    pub authorization_token: Secret<String>,
 }
 
 impl EmailClientSettings {
@@ -67,15 +67,24 @@ pub fn get_configuration() -> Result<Setting, config::ConfigError> {
     // 读取配置文件目录
     let configuration_directory = base_path.join("configuration");
     // 检查运行时环境，如果没有指定则默认是"local"
-    let environment: Environment = std::env::var("APP_ENVIRONMENT").unwrap_or_else(|_| "local".into())
+    let environment: Environment = std::env::var("APP_ENVIRONMENT")
+        .unwrap_or_else(|_| "local".into())
         .try_into()
         .expect("Failed to parse APP_ENVIRONMENT.");
     let environment_filename = format!("{}.yaml", environment.as_str());
     let settings = config::Config::builder()
-        .add_source(config::File::from(configuration_directory.join("base.yaml")))
-        .add_source(config::File::from(configuration_directory.join(&environment_filename)))
+        .add_source(config::File::from(
+            configuration_directory.join("base.yaml"),
+        ))
+        .add_source(config::File::from(
+            configuration_directory.join(&environment_filename),
+        ))
         // 从环境变量中添加设置,例如，通过 APP_APPLICATION__PORT可以设置为 Settings.application.port
-        .add_source(config::Environment::with_prefix("APP").prefix_separator("_").separator("__"))
+        .add_source(
+            config::Environment::with_prefix("APP")
+                .prefix_separator("_")
+                .separator("__"),
+        )
         .build()?;
     settings.try_deserialize::<Setting>()
 }
@@ -102,11 +111,9 @@ impl TryFrom<String> for Environment {
             "local" => Ok(Self::Local),
             "production" => Ok(Self::Production),
             other => Err(format!(
-                "{} is not a supported environment. Use either `local` or `production`. ", other
+                "{} is not a supported environment. Use either `local` or `production`. ",
+                other
             )),
         }
     }
 }
-
-
-

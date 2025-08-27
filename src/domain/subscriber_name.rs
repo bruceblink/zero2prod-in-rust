@@ -9,12 +9,12 @@ impl SubscriberName {
         // 判断字符串是否长度
         let is_too_long = s.graphemes(true).count() > 256;
         // 特殊字符
-        let forbidden_characters = ['/', '(', ')', '"', '<', '>', '\\', '{','}'];
+        let forbidden_characters = ['/', '(', ')', '"', '<', '>', '\\', '{', '}'];
         let contains_forbidden_characters = s.chars().any(|x| forbidden_characters.contains(&x));
 
         if is_empty_or_whitespace || is_too_long || contains_forbidden_characters {
             Err(format!("{} is not a valid subscriber name.", s))
-        }else {
+        } else {
             Ok(Self(s))
         }
     }
