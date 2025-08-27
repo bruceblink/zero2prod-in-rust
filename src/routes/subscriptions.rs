@@ -49,15 +49,16 @@ pub async fn insert_subscriber(
     pool: &PgPool,
     new_subscriber: &NewSubscriber,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query!(
+    sqlx::query(
         r#"
-        INSERT INTO subscriptions (id, email, name, subscribed_at)
-        values ($1, $2, $3, $4)"#,
-        Uuid::new_v4(),
-        new_subscriber.email.as_ref(),
-        new_subscriber.name.as_ref(),
-        Utc::now()
+            INSERT INTO subscriptions (id, email, name, subscribed_at)
+            values ($1, $2, $3, $4)
+        ;"#,
     )
+    .bind(Uuid::new_v4())
+    .bind(new_subscriber.email.as_ref())
+    .bind(new_subscriber.name.as_ref())
+    .bind(Utc::now())
     .execute(pool)
     .await
     .map_err(|e| {
